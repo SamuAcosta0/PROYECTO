@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title>Nexo Precios</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      form { margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+      label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      input { width: 100%; padding: 0.35rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+      th { background: #f4f4f4; }
+      .error { color: #b00020; margin-bottom: 1rem; }
+      .summary { margin-top: 1rem; padding: 0.75rem; background: #f7f9fb; border: 1px solid #e0e6ed; }
+    </style>
+  </head>
+  <body>
+    <h1>Nexo - Consulta de precios</h1>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <form method="get">
+      <div>
+        <label for="producto">Producto</label>
+        <input id="producto" name="producto" value="{{ filtros.producto }}" placeholder="Nombre de producto">
+      </div>
+      <div>
+        <label for="barrio">Barrio</label>
+        <input id="barrio" name="barrio" value="{{ filtros.barrio }}" placeholder="Nombre de barrio">
+      </div>
+      <div>
+        <label for="comercio">Comercio</label>
+        <input id="comercio" name="comercio" value="{{ filtros.comercio }}" placeholder="Nombre de comercio">
+      </div>
+      <div>
+        <label for="fecha_desde">Fecha desde</label>
+        <input id="fecha_desde" type="date" name="fecha_desde" value="{{ filtros.fecha_desde }}">
+      </div>
+      <div>
+        <label for="fecha_hasta">Fecha hasta</label>
+        <input id="fecha_hasta" type="date" name="fecha_hasta" value="{{ filtros.fecha_hasta }}">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <input type="submit" value="Filtrar">
+      </div>
+    </form>
+
+    <div class="summary">
+      <strong>Resumen:</strong>
+      <ul>
+        <li>Total de precios: {{ resumen.total_precios or 0 }}</li>
+        <li>Precio mínimo: {{ resumen.precio_minimo or "-" }}</li>
+        <li>Precio máximo: {{ resumen.precio_maximo or "-" }}</li>
+        <li>Precio promedio: {{ resumen.precio_promedio or "-" }}</li>
+      </ul>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Producto</th>
+          <th>Marca</th>
+          <th>Sucursal</th>
+          <th>Barrio</th>
+          <th>Comercio</th>
+          <th>Fuente</th>
+          <th>Precio</th>
+          <th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if precios %}
+          {% for precio in precios %}
+            <tr>
+              <td>{{ precio.id_precio }}</td>
+              <td>{{ precio.producto }}</td>
+              <td>{{ precio.marca or "" }}</td>
+              <td>{{ precio.nombre_sucursal }}</td>
+              <td>{{ precio.nombre_barrio }}</td>
+              <td>{{ precio.nombre_comercio }}</td>
+              <td>{{ precio.nombre_fuente }}</td>
+              <td>{{ precio.precio_lista }}</td>
+              <td>{{ precio.fecha_captura }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="9">No se encontraron precios para los filtros seleccionados.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </body>
+</html>
