@@ -1,137 +1,99 @@
-{% extends "base.html" %}
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title>Nexo Precios</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      form { margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+      label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      input { width: 100%; padding: 0.35rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+      th { background: #f4f4f4; }
+      .error { color: #b00020; margin-bottom: 1rem; }
+      .summary { margin-top: 1rem; padding: 0.75rem; background: #f7f9fb; border: 1px solid #e0e6ed; }
+    </style>
+  </head>
+  <body>
+    <h1>Nexo - Consulta de precios</h1>
 
-{% block title %}NEXO - Motor de Precios (MVP){% endblock %}
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
 
-{% block content %}
-  <header class="page-header">
-    <h1>NEXO – Motor de Precios (MVP)</h1>
-    <p>Explorá los precios registrados aplicando los filtros disponibles.</p>
-  </header>
-
-  <section class="filters">
-    <form method="get" class="filters__form">
-      <div class="form-row">
+    <form method="get">
+      <div>
         <label for="producto">Producto</label>
-        <select id="producto" name="producto">
-          <option value="">Todos</option>
-          {% for producto in productos %}
-            <option value="{{ producto.id }}" {% if filters.producto == producto.id %}selected{% endif %}>
-              {{ producto.nombre }}
-            </option>
-          {% endfor %}
-        </select>
+        <input id="producto" name="producto" value="{{ filtros.producto }}" placeholder="Nombre de producto">
       </div>
-
-      <div class="form-row">
+      <div>
         <label for="barrio">Barrio</label>
-        <select id="barrio" name="barrio">
-          <option value="">Todos</option>
-          {% for barrio in barrios %}
-            <option value="{{ barrio.id }}" {% if filters.barrio == barrio.id %}selected{% endif %}>
-              {{ barrio.nombre }}
-            </option>
-          {% endfor %}
-        </select>
+        <input id="barrio" name="barrio" value="{{ filtros.barrio }}" placeholder="Nombre de barrio">
       </div>
-
-      <div class="form-row">
+      <div>
         <label for="comercio">Comercio</label>
-        <select id="comercio" name="comercio">
-          <option value="">Todos</option>
-          {% for comercio in comercios %}
-            <option value="{{ comercio.id }}" {% if filters.comercio == comercio.id %}selected{% endif %}>
-              {{ comercio.nombre }}
-            </option>
-          {% endfor %}
-        </select>
+        <input id="comercio" name="comercio" value="{{ filtros.comercio }}" placeholder="Nombre de comercio">
       </div>
-
-      <div class="form-row">
+      <div>
         <label for="fecha_desde">Fecha desde</label>
-        <input
-          type="date"
-          id="fecha_desde"
-          name="fecha_desde"
-          value="{{ filters.fecha_desde or '' }}"
-        />
+        <input id="fecha_desde" type="date" name="fecha_desde" value="{{ filtros.fecha_desde }}">
       </div>
-
-      <div class="form-row">
+      <div>
         <label for="fecha_hasta">Fecha hasta</label>
-        <input
-          type="date"
-          id="fecha_hasta"
-          name="fecha_hasta"
-          value="{{ filters.fecha_hasta or '' }}"
-        />
+        <input id="fecha_hasta" type="date" name="fecha_hasta" value="{{ filtros.fecha_hasta }}">
       </div>
-
-      <div class="form-actions">
-        <button type="submit">Filtrar</button>
+      <div>
+        <label>&nbsp;</label>
+        <input type="submit" value="Filtrar">
       </div>
     </form>
-  </section>
 
-  <section class="map">
-    <h2>Mapa de precios</h2>
-    <div id="map" style="height: 400px;"></div>
-  </section>
+    <div class="summary">
+      <strong>Resumen:</strong>
+      <ul>
+        <li>Total de precios: {{ resumen.total_precios or 0 }}</li>
+        <li>Precio mínimo: {{ resumen.precio_minimo or "-" }}</li>
+        <li>Precio máximo: {{ resumen.precio_maximo or "-" }}</li>
+        <li>Precio promedio: {{ resumen.precio_promedio or "-" }}</li>
+      </ul>
+    </div>
 
-  {% if filters.producto %}
-    <section class="summary">
-      <h2>Resumen para el producto seleccionado</h2>
-      <div class="summary__cards">
-        <article class="card">
-          <h3>Mínimo</h3>
-          <p>{{ resumen.minimo }}</p>
-        </article>
-        <article class="card">
-          <h3>Máximo</h3>
-          <p>{{ resumen.maximo }}</p>
-        </article>
-        <article class="card">
-          <h3>Promedio</h3>
-          <p>{{ resumen.promedio }}</p>
-        </article>
-        <article class="card">
-          <h3>Cantidad</h3>
-          <p>{{ resumen.cantidad }}</p>
-        </article>
-      </div>
-    </section>
-  {% endif %}
-
-  <section class="results">
-    <h2>Resultados</h2>
-    {% if precios %}
-      <table class="results__table">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Marca</th>
-            <th>Comercio</th>
-            <th>Barrio</th>
-            <th>Fuente</th>
-            <th>Precio</th>
-            <th>Fecha</th>
-          </tr>
-        </thead>
-        <tbody>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Producto</th>
+          <th>Marca</th>
+          <th>Sucursal</th>
+          <th>Barrio</th>
+          <th>Comercio</th>
+          <th>Fuente</th>
+          <th>Precio</th>
+          <th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if precios %}
           {% for precio in precios %}
             <tr>
+              <td>{{ precio.id_precio }}</td>
               <td>{{ precio.producto }}</td>
-              <td>{{ precio.marca }}</td>
-              <td>{{ precio.comercio }}</td>
-              <td>{{ precio.barrio }}</td>
-              <td>{{ precio.fuente }}</td>
-              <td>{{ precio.precio }}</td>
-              <td>{{ precio.fecha }}</td>
+              <td>{{ precio.marca or "" }}</td>
+              <td>{{ precio.nombre_sucursal }}</td>
+              <td>{{ precio.nombre_barrio }}</td>
+              <td>{{ precio.nombre_comercio }}</td>
+              <td>{{ precio.nombre_fuente }}</td>
+              <td>{{ precio.precio_lista }}</td>
+              <td>{{ precio.fecha_captura }}</td>
             </tr>
           {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p>No se encontraron precios para los filtros seleccionados.</p>
-    {% endif %}
-  </section>
-{% endblock %}
+        {% else %}
+          <tr>
+            <td colspan="9">No se encontraron precios para los filtros seleccionados.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </body>
+</html>
