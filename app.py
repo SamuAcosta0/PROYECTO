@@ -1,9 +1,12 @@
-from typing import List, Optional, Sequence, Tuple
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import psycopg2
-from flask import Flask, render_template, request
+from psycopg2.extras import RealDictCursor
+from flask import Flask, jsonify, render_template, request
 
-DB_CONFIG = {
+DB_CONFIG: Dict[str, Any] = {
     "dbname": "nexo_precios",
     "user": "TU_USUARIO_AQUI",
     "password": "TU_PASSWORD_AQUI",
@@ -15,99 +18,202 @@ app = Flask(__name__)
 
 
 def get_connection() -> Optional[psycopg2.extensions.connection]:
-    """Create a new PostgreSQL connection using DB_CONFIG or return None on failure."""
+    """Crea y devuelve una conexión a la base de datos o None si falla."""
     try:
         return psycopg2.connect(**DB_CONFIG)
     except psycopg2.Error as exc:
-        print(f"Error al conectar a la base de datos: {exc}")
-    except Exception as exc:  # pylint: disable=broad-except
-        print(f"Error inesperado al conectar: {exc}")
+        app.logger.error("No se pudo conectar a la base de datos: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("Error inesperado al conectar a la base de datos: %s", exc)
     return None
 
 
-def run_query(sql: str, params: Optional[Sequence[object]] = None) -> List[Tuple]:
-    """Execute a SELECT query and return all rows, handling errors gracefully."""
-    rows: List[Tuple] = []
-    conn = get_connection()
-    if conn is None:
-        return rows
+def run_query(
+    query: str,
+    params: Optional[Sequence[object]] = None,
+    fetch: str = "all",
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Ejecuta una consulta y devuelve filas y un posible mensaje de error."""
+    connection = get_connection()
+    if connection is None:
+        return None, "No se pudo conectar a la base de datos."
 
-    cur = conn.cursor()
     try:
-        cur.execute(sql, params or [])
-        rows = cur.fetchall()
+        with connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query, params)
+                if fetch == "one":
+                    return cursor.fetchone(), None
+                return list(cursor.fetchall()), None
     except psycopg2.Error as exc:
-        print(f"Error al ejecutar la consulta: {exc}")
-    except Exception as exc:  # pylint: disable=broad-except
-        print(f"Error inesperado al ejecutar la consulta: {exc}")
+        app.logger.error("Falló la ejecución de la consulta: %s", exc)
+        return None, "Ocurrió un problema al consultar la base de datos."
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("Error inesperado durante la consulta: %s", exc)
+        return None, "Ocurrió un error inesperado durante la consulta."
     finally:
-        try:
-            cur.close()
-        except Exception:  # pylint: disable=broad-except
-            pass
-        try:
-            conn.close()
-        except Exception:  # pylint: disable=broad-except
-            pass
-    return rows
+        connection.close()
 
 
-@app.route("/", methods=["GET"])
-def index():
-    """Render the price listing with optional filters for producto and barrio."""
-    producto = request.args.get("producto", "").strip()
-    barrio = request.args.get("barrio", "").strip()
+FILTER_FIELDS = {
+    "producto": "pr.nombre",
+    "barrio": "b.nombre_barrio",
+    "comercio": "c.nombre_comercio",
+}
 
-    sql = """
+
+def build_filter_clause(args: Dict[str, str]) -> Tuple[str, List[object]]:
+    conditions: List[str] = []
+    params: List[object] = []
+
+    for field, column in FILTER_FIELDS.items():
+        value = args.get(field, "").strip()
+        if value:
+            conditions.append(f"{column} ILIKE %s")
+            params.append(f"%{value}%")
+
+    fecha_desde = args.get("fecha_desde", "").strip()
+    if fecha_desde:
+        conditions.append("p.fecha_captura >= %s")
+        params.append(fecha_desde)
+
+    fecha_hasta = args.get("fecha_hasta", "").strip()
+    if fecha_hasta:
+        conditions.append("p.fecha_captura <= %s")
+        params.append(fecha_hasta)
+
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+    return where_clause, params
+
+
+def fetch_price_rows(filters: Dict[str, str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    where_clause, params = build_filter_clause(filters)
+    query = f"
         SELECT
             p.id_precio,
-            pr.nombre       AS producto,
-            pr.marca        AS marca,
-            s.nombre        AS sucursal,
-            b.nombre_barrio AS barrio,
-            c.nombre        AS comercio,
-            f.nombre        AS fuente,
-            p.precio_lista  AS precio,
-            p.fecha_captura AS fecha
-        FROM precio p
-        JOIN producto pr      ON pr.id_producto = p.id_producto
-        JOIN sucursal s       ON s.id_sucursal  = p.id_sucursal
-        JOIN barrio b         ON b.id_barrio    = s.id_barrio
-        JOIN comercio c       ON c.id_com       = s.id_com
-        JOIN fuente_datos f   ON f.id_fuente    = p.id_fuente
-        WHERE 1 = 1
-    """
+            pr.nombre AS producto,
+            pr.marca,
+            s.nombre_sucursal,
+            b.nombre_barrio,
+            c.nombre_comercio,
+            f.nombre_fuente,
+            p.precio_lista,
+            p.fecha_captura
+        FROM precio AS p
+        JOIN producto AS pr ON p.id_producto = pr.id_producto
+        JOIN sucursal AS s ON p.id_sucursal = s.id_sucursal
+        JOIN barrio AS b ON s.id_barrio = b.id_barrio
+        JOIN comercio AS c ON s.id_comercio = c.id_comercio
+        JOIN fuente_datos AS f ON p.id_fuente = f.id_fuente
+        {where_clause}
+        ORDER BY p.fecha_captura DESC, p.id_precio DESC;
+    ""
 
-    params: List[object] = []
-    if producto:
-        sql += " AND pr.nombre ILIKE %s"
-        params.append(f"%{producto}%")
-    if barrio:
-        sql += " AND b.nombre_barrio ILIKE %s"
-        params.append(f"%{barrio}%")
+    rows, error = run_query(query, params)
+    return rows or [], error
 
-    sql += " ORDER BY p.fecha_captura DESC"
 
-    rows = run_query(sql, tuple(params))
+def fetch_price_summary(filters: Dict[str, str]) -> Tuple[Dict[str, Any], Optional[str]]:
+    where_clause, params = build_filter_clause(filters)
+    query = f"
+        SELECT
+            MIN(p.precio_lista) AS precio_minimo,
+            MAX(p.precio_lista) AS precio_maximo,
+            AVG(p.precio_lista) AS precio_promedio,
+            COUNT(*) AS total_precios
+        FROM precio AS p
+        JOIN producto AS pr ON p.id_producto = pr.id_producto
+        JOIN sucursal AS s ON p.id_sucursal = s.id_sucursal
+        JOIN barrio AS b ON s.id_barrio = b.id_barrio
+        JOIN comercio AS c ON s.id_comercio = c.id_comercio
+        {where_clause};
+    ""
 
-    resumen = None
-    if rows:
-        precios = [float(row[7]) for row in rows if row[7] is not None]
-        if precios:
-            resumen = {
-                "minimo": min(precios),
-                "maximo": max(precios),
-                "promedio": sum(precios) / len(precios),
-                "cantidad": len(precios),
-            }
+    summary, error = run_query(query, params, fetch="one")
+    return summary or {}, error
+
+
+@app.route("/")
+def index() -> str:
+    filters = {
+        "producto": request.args.get("producto", ""),
+        "barrio": request.args.get("barrio", ""),
+        "comercio": request.args.get("comercio", ""),
+        "fecha_desde": request.args.get("fecha_desde", ""),
+        "fecha_hasta": request.args.get("fecha_hasta", ""),
+    }
+
+    precios, price_error = fetch_price_rows(filters)
+    resumen, summary_error = fetch_price_summary(filters)
+    error = price_error or summary_error
 
     return render_template(
         "index.html",
-        rows=rows,
-        producto=producto,
-        barrio=barrio,
+        precios=precios,
         resumen=resumen,
+        filtros=filters,
+        error=error,
     )
+
+
+@app.route("/api/sucursales")
+def api_sucursales() -> Any:
+    filters = {
+        "producto": request.args.get("producto", ""),
+        "barrio": request.args.get("barrio", ""),
+        "comercio": request.args.get("comercio", ""),
+        "fecha_desde": request.args.get("fecha_desde", ""),
+        "fecha_hasta": request.args.get("fecha_hasta", ""),
+    }
+
+    where_clause, params = build_filter_clause(filters)
+
+    precio_minimo_expr = "MIN(p.precio_lista) AS precio_minimo" if filters.get("producto") else "NULL AS precio_minimo"
+
+    query = f"
+        SELECT
+            s.id_sucursal,
+            s.nombre_sucursal,
+            b.nombre_barrio,
+            c.nombre_comercio,
+            COUNT(p.id_precio) AS total_precios,
+            MAX(p.fecha_captura) AS ultima_captura,
+            {precio_minimo_expr}
+        FROM sucursal AS s
+        JOIN barrio AS b ON s.id_barrio = b.id_barrio
+        JOIN comercio AS c ON s.id_comercio = c.id_comercio
+        JOIN precio AS p ON p.id_sucursal = s.id_sucursal
+        JOIN producto AS pr ON p.id_producto = pr.id_producto
+        {where_clause}
+        GROUP BY s.id_sucursal, s.nombre_sucursal, b.nombre_barrio, c.nombre_comercio
+        HAVING COUNT(p.id_precio) > 0
+        ORDER BY ultima_captura DESC, total_precios DESC;
+    ""
+
+    rows, error = run_query(query, params)
+    if error is not None:
+        return jsonify({"error": error}), 500
+
+    return jsonify({"sucursales": rows})
+
+
+@app.route("/api/precios")
+def api_precios() -> Any:
+    filters = {
+        "producto": request.args.get("producto", ""),
+        "barrio": request.args.get("barrio", ""),
+        "comercio": request.args.get("comercio", ""),
+        "fecha_desde": request.args.get("fecha_desde", ""),
+        "fecha_hasta": request.args.get("fecha_hasta", ""),
+    }
+
+    precios, price_error = fetch_price_rows(filters)
+    resumen, summary_error = fetch_price_summary(filters)
+    error = price_error or summary_error
+    if error is not None:
+        return jsonify({"error": error}), 500
+
+    return jsonify({"precios": precios, "resumen": resumen})
 
 
 if __name__ == "__main__":
